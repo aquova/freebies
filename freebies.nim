@@ -1,11 +1,10 @@
-import httpclient, json, os, strscans, strformat, strutils, times
+import httpclient, json, os, parseopt, strscans, strformat, strutils, times
 
 const EPIC_DB = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?country=US"
 const EPIC_URL = "https://store.epicgames.com/en-US/p/"
 const UTC_NOTIFY_TIME = 18
 const NTFY_SERVER = "ntfy.sh"
 const NTFY_TOPIC = "giveaways"
-const JNULL_STR = "default"
 
 type GameData = tuple
     name, url: string
@@ -28,10 +27,10 @@ proc getGames(): seq[GameData] =
         let name = game["title"].getStr()
         var url = game["productSlug"].getStr()
 
-        if url == JNULL_STR and len(game["catalogNs"]["mappings"]) > 0:
+        if url == "" and len(game["catalogNs"]["mappings"]) > 0:
             url = game["catalogNs"]["mappings"][0]["pageSlug"].getStr()
 
-        if url == JNULL_STR:
+        if url == "":
             continue
 
         url.removeSuffix("/home")
@@ -63,7 +62,8 @@ proc getGames(): seq[GameData] =
 proc sendNotification(games: seq[GameData]) =
     var client = newHttpClient()
     for game in games:
-        let body = &"{game.name}\n{game.url}"
+        let body = &"New free Epic game:\n{game.name}\n{game.url}"
+        echo(body)
         discard client.postContent(NTFY_SERVER & NTFY_TOPIC, body = body)
         sleep(1000)
 
@@ -74,20 +74,33 @@ proc sleepUntilTime() =
     let tomorrow = dateTime(today_date.year, cast[Month](today_date.month), today_date.day + 1, hour = UTC_NOTIFY_TIME, zone = utc())
     if today > current:
         let dt = today - current
-        echo(&"Sleeping for {dt.inMilliseconds()} ms")
         sleep(int(dt.inMilliseconds()))
     else:
         let dt = tomorrow - current
-        echo(&"Sleeping for {dt.inMilliseconds()} ms")
         sleep(int(dt.inMilliseconds()))
 
-proc main() =
+proc check() =
+    let games = getGames()
+    if games.len() > 0:
+        sendNotification(games)
+
+proc loopForever() =
     while true:
         sleepUntilTime()
-        let games = getGames()
-        echo(games.len())
-        if games.len() > 0:
-            sendNotification(games)
+        check()
+
+proc main() =
+    var opts = initOptParser()
+    var cron_mode = false
+
+    for kind, key, val in opts.getopt():
+        if kind == cmdShortOption and key == "c":
+            cron_mode = true
+
+    if cron_mode:
+        check()
+    else:
+        loopForever()
 
 when isMainModule:
     main()
